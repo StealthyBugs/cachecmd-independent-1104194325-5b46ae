@@ -1,0 +1,77 @@
+name: Cache command independent status oracle
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+  statuses: write
+jobs:
+  probe:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - id: normal
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: inert-cache-path
+          key: normal-control-${{ github.run_id }}
+          lookup-only: true
+      - id: injected
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: inert-cache-path
+          key: ${{ github.event.pull_request.body }}
+          lookup-only: true
+      - name: Fixed exact-marker status impact
+        if: ${{ steps.injected.outputs.probe == 'CACHECMD-INDEPENDENT-666d30dc8fe910de3ec7e45b' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATUS_REPOSITORY: ${{ github.repository }}
+          STATUS_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          body = json.dumps({
+              "state": "success",
+              "context": "cache-command-independent/6438cd7e3ba7bc1e",
+              "description": "Owned inert exact-output oracle",
+          }).encode()
+          request = urllib.request.Request(
+              "https://api.github.com/repos/" + os.environ["STATUS_REPOSITORY"] + "/statuses/" + os.environ["STATUS_SHA"],
+              data=body,
+              method="POST",
+              headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Content-Type": "application/json",
+                  "User-Agent": "owned-cache-command-independent",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              print("CACHE_STATUS_ORACLE " + json.dumps({"status": response.status, "posted": response.status == 201}, sort_keys=True))
+          PY
+      - name: Fixed downstream output oracle
+        if: always()
+        env:
+          NORMAL_PROBE: ${{ steps.normal.outputs.probe }}
+          INJECTED_PROBE: ${{ steps.injected.outputs.probe }}
+          PRIMARY_KEY: ${{ steps.injected.outputs.cache-primary-key }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          normal = os.environ.get("NORMAL_PROBE", "")
+          injected = os.environ.get("INJECTED_PROBE", "")
+          primary = os.environ.get("PRIMARY_KEY", "")
+          result = {
+              "normal_probe_empty": normal == "",
+              "injected_probe_exact": hashlib.sha256(injected.encode()).hexdigest() == "c55d53f70924c596a7e599ed72c5b34fdc0078fc5d92f956ffe8714fab289af1" and len(injected) == 45,
+              "injected_probe_sha256": hashlib.sha256(injected.encode()).hexdigest(),
+              "injected_probe_length": len(injected),
+              "primary_contains_marker": "CACHECMD-INDEPENDENT-666d30dc8fe910de3ec7e45b" in primary,
+              "primary_line_count": len(primary.splitlines()),
+          }
+          print("CACHE_COMMAND_ORACLE " + json.dumps(result, sort_keys=True, separators=(",", ":")))
+          PY
